@@ -1,0 +1,15 @@
+{
+  "name": "K-Zone Pitch Tracker",
+  "short_name": "K-Zone",
+  "display": "standalone",
+  "background_color": "#12203a",
+  "theme_color": "#12203a",
+  "start_url": "/",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
