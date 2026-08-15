@@ -65,6 +65,9 @@ const eventSaveQueue = new Map<string, Promise<void>>()
 
 function applyRemote(prev: AppData, remote: RemoteData): AppData {
   const removed = new Set(prev.removedEventIds ?? [])
+  const unsyncedEvents = new Set(prev.unsyncedEventIds ?? [])
+  const unsyncedPitches = new Set(prev.unsyncedPitchIds ?? [])
+  const inFlightEventIds = new Set(eventSaveQueue.keys())
   const players = remote.players.length > 0 ? remote.players : prev.players
 
   let currentPlayerId = prev.currentPlayerId
@@ -81,14 +84,26 @@ function applyRemote(prev: AppData, remote: RemoteData): AppData {
 
   const remoteEvents = remote.events.filter((e) => !removed.has(e.id))
   const remotePitches = remote.pitches.filter((p) => !removed.has(p.eventId))
-
   const remoteEventIds = new Set(remoteEvents.map((e) => e.id))
-  const pendingEvents = prev.events.filter((e) => !remoteEventIds.has(e.id) && !removed.has(e.id))
-  const events = [...pendingEvents, ...remoteEvents]
-
   const remotePitchIds = new Set(remotePitches.map((p) => p.id))
+
+  // Keep local-only rows that this device created and has not confirmed on the server.
+  // Do not keep cached copies of events that used to exist remotely — those were deleted.
+  const pendingEvents = prev.events.filter(
+    (e) =>
+      !remoteEventIds.has(e.id) &&
+      !removed.has(e.id) &&
+      (inFlightEventIds.has(e.id) || unsyncedEvents.has(e.id)),
+  )
+  const events = [...pendingEvents, ...remoteEvents]
+  const eventIds = new Set(events.map((e) => e.id))
+
   const pendingPitches = prev.pitches.filter(
-    (p) => !remotePitchIds.has(p.id) && !removed.has(p.eventId),
+    (p) =>
+      !remotePitchIds.has(p.id) &&
+      !removed.has(p.eventId) &&
+      eventIds.has(p.eventId) &&
+      unsyncedPitches.has(p.id),
   )
   const pitches = [...remotePitches, ...pendingPitches]
 
@@ -97,13 +112,23 @@ function applyRemote(prev: AppData, remote: RemoteData): AppData {
       remote.events.some((e) => e.id === id) || remote.pitches.some((p) => p.eventId === id),
   )
 
+  let currentEventId = prev.currentEventId
+  if (currentEventId && !eventIds.has(currentEventId)) {
+    currentEventId = null
+  }
+
   return persist({
     ...prev,
     players,
     events,
     pitches,
     currentPlayerId,
+    currentEventId,
     removedEventIds,
+    unsyncedEventIds: [...unsyncedEvents].filter((id) => !remoteEventIds.has(id) && eventIds.has(id)),
+    unsyncedPitchIds: [...unsyncedPitches].filter(
+      (id) => !remotePitchIds.has(id) && pitches.some((p) => p.id === id),
+    ),
   })
 }
 
@@ -133,19 +158,43 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setCloudStatus((status) => (status === 'off' ? 'off' : 'connecting'))
     fetchRemoteData()
       .then((remote) => {
+        let unsyncedToPush: GameEvent[] = []
+        let unsyncedPitchesToPush: Pitch[] = []
         setData((prev) => {
           const next = applyRemote(prev, remote)
-          const remoteIds = new Set(remote.events.map((e) => e.id))
-          for (const event of next.events) {
-            if (!remoteIds.has(event.id) && !next.removedEventIds.includes(event.id)) {
-              void insertEvent(event).catch((error) => logSyncError('sync event', error))
-            }
-          }
+          unsyncedToPush = next.events.filter((event) => next.unsyncedEventIds.includes(event.id))
+          unsyncedPitchesToPush = next.pitches.filter((pitch) =>
+            next.unsyncedPitchIds.includes(pitch.id),
+          )
           for (const id of next.removedEventIds) {
             void deleteEvent(id).catch((error) => logSyncError('remove event', error))
           }
           return next
         })
+        for (const event of unsyncedToPush) {
+          void insertEvent(event)
+            .then(() => {
+              setData((prev) =>
+                persist({
+                  ...prev,
+                  unsyncedEventIds: prev.unsyncedEventIds.filter((id) => id !== event.id),
+                }),
+              )
+            })
+            .catch((error) => logSyncError('sync event', error))
+        }
+        for (const pitch of unsyncedPitchesToPush) {
+          void insertPitch(pitch)
+            .then(() => {
+              setData((prev) =>
+                persist({
+                  ...prev,
+                  unsyncedPitchIds: prev.unsyncedPitchIds.filter((id) => id !== pitch.id),
+                }),
+              )
+            })
+            .catch((error) => logSyncError('sync pitch', error))
+        }
         setCloudStatus('on')
         setCloudError(null)
       })
@@ -236,12 +285,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           events: [event, ...prev.events],
           currentEventId: event.id,
           currentPlayerId: null,
+          unsyncedEventIds: prev.unsyncedEventIds.includes(event.id)
+            ? prev.unsyncedEventIds
+            : [...prev.unsyncedEventIds, event.id],
         }),
       )
       const save = insertEvent(event)
       eventSaveQueue.set(event.id, save)
       try {
         await save
+        setData((prev) =>
+          persist({
+            ...prev,
+            unsyncedEventIds: prev.unsyncedEventIds.filter((id) => id !== event.id),
+          }),
+        )
         setCloudError(null)
       } catch (error) {
         logSyncError('create event', error)
@@ -266,6 +324,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         removedEventIds: prev.removedEventIds.includes(id)
           ? prev.removedEventIds
           : [...prev.removedEventIds, id],
+        unsyncedEventIds: prev.unsyncedEventIds.filter((eventId) => eventId !== id),
+        unsyncedPitchIds: prev.unsyncedPitchIds.filter(
+          (pitchId) => !prev.pitches.some((p) => p.id === pitchId && p.eventId === id),
+        ),
       }),
     )
     void deleteEvent(id).catch((error) => {
@@ -291,22 +353,41 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         result: input.result,
         createdAt: new Date().toISOString(),
       }
-      setData((prev) => persist({ ...prev, pitches: [...prev.pitches, pitch] }))
+      setData((prev) =>
+        persist({
+          ...prev,
+          pitches: [...prev.pitches, pitch],
+          unsyncedPitchIds: prev.unsyncedPitchIds.includes(pitch.id)
+            ? prev.unsyncedPitchIds
+            : [...prev.unsyncedPitchIds, pitch.id],
+        }),
+      )
       void (async () => {
         try {
           if (dataRef.current.removedEventIds.includes(pitch.eventId)) return
           const pendingEvent = eventSaveQueue.get(pitch.eventId)
           if (pendingEvent) await pendingEvent
           if (dataRef.current.removedEventIds.includes(pitch.eventId)) return
+          if (!dataRef.current.events.some((item) => item.id === pitch.eventId)) return
           const event = dataRef.current.events.find((item) => item.id === pitch.eventId)
-          if (event) {
+          if (
+            event &&
+            (eventSaveQueue.has(event.id) || dataRef.current.unsyncedEventIds.includes(event.id))
+          ) {
             await insertEvent({
               ...event,
               date: event.date || todayInputValue(),
             })
           }
           if (dataRef.current.removedEventIds.includes(pitch.eventId)) return
+          if (!dataRef.current.events.some((item) => item.id === pitch.eventId)) return
           await insertPitch(pitch)
+          setData((prev) =>
+            persist({
+              ...prev,
+              unsyncedPitchIds: prev.unsyncedPitchIds.filter((id) => id !== pitch.id),
+            }),
+          )
           setCloudError(null)
         } catch (error) {
           logSyncError('add pitch', error)
@@ -331,7 +412,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
       }
       if (!removedId) return prev
-      return persist({ ...prev, pitches })
+      return persist({
+        ...prev,
+        pitches,
+        unsyncedPitchIds: prev.unsyncedPitchIds.filter((id) => id !== removedId),
+      })
     })
     if (removedId) {
       void deletePitch(removedId).catch((error) => {

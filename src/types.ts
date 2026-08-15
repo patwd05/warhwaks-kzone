@@ -35,4 +35,6 @@ export type AppData = {
   currentEventId: string | null
   currentPlayerId: string | null
   removedEventIds: string[]
+  unsyncedEventIds: string[]
+  unsyncedPitchIds: string[]
 }

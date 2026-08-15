@@ -10,6 +10,8 @@ const empty: AppData = {
   currentEventId: null,
   currentPlayerId: null,
   removedEventIds: [],
+  unsyncedEventIds: [],
+  unsyncedPitchIds: [],
 }
 
 export function newId(): string {
@@ -52,6 +54,8 @@ export function loadData(): AppData {
       currentEventId: parsed.currentEventId ?? null,
       currentPlayerId: parsed.currentPlayerId ?? null,
       removedEventIds: parsed.removedEventIds ?? [],
+      unsyncedEventIds: parsed.unsyncedEventIds ?? [],
+      unsyncedPitchIds: parsed.unsyncedPitchIds ?? [],
     }
   } catch {
     return { ...empty, players: seedPlayers() }
