@@ -2,12 +2,23 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from 'react'
+import {
+  deletePitch,
+  deletePlayer,
+  fetchRemoteData,
+  insertEvent,
+  insertPitch,
+  insertPlayer,
+  logSyncError,
+} from './api'
 import type { AppData, EventType, GameEvent, Pitch, Player } from './types'
 import { loadData, newId, saveData } from './storage'
+import { isSupabaseConfigured } from './supabase'
 
 type StoreValue = AppData & {
   addPlayer: (name: string) => Player
@@ -39,10 +50,40 @@ function persist(next: AppData) {
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [data, setData] = useState<AppData>(() => loadData())
 
+  useEffect(() => {
+    if (!isSupabaseConfigured) return
+    let cancelled = false
+    fetchRemoteData()
+      .then((remote) => {
+        if (cancelled) return
+        setData((prev) => {
+          const players = remote.players.length > 0 ? remote.players : prev.players
+          if (remote.players.length === 0 && prev.players.length > 0) {
+            for (const player of prev.players) {
+              void insertPlayer(player).catch((error) => logSyncError('seed player', error))
+            }
+          }
+          return persist({
+            ...prev,
+            players,
+            events: remote.events,
+            pitches: remote.pitches,
+            currentEventId: prev.currentEventId,
+            currentPlayerId: prev.currentPlayerId,
+          })
+        })
+      })
+      .catch((error) => logSyncError('load', error))
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const addPlayer = useCallback((name: string) => {
     const player: Player = {
       id: newId(),
       name: name.trim(),
+      sortOrder: Date.now(),
       createdAt: new Date().toISOString(),
     }
     setData((prev) =>
@@ -52,6 +93,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         currentPlayerId: prev.currentPlayerId ?? player.id,
       }),
     )
+    void insertPlayer(player).catch((error) => logSyncError('add player', error))
     return player
   }, [])
 
@@ -60,10 +102,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       persist({
         ...prev,
         players: prev.players.filter((p) => p.id !== id),
-        currentPlayerId:
-          prev.currentPlayerId === id ? null : prev.currentPlayerId,
+        pitches: prev.pitches.filter((p) => p.playerId !== id),
+        currentPlayerId: prev.currentPlayerId === id ? null : prev.currentPlayerId,
       }),
     )
+    void deletePlayer(id).catch((error) => logSyncError('remove player', error))
   }, [])
 
   const createEvent = useCallback(
@@ -82,6 +125,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           currentEventId: event.id,
         }),
       )
+      void insertEvent(event).catch((error) => logSyncError('create event', error))
       return event
     },
     [],
@@ -105,26 +149,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         createdAt: new Date().toISOString(),
       }
       setData((prev) => persist({ ...prev, pitches: [...prev.pitches, pitch] }))
+      void insertPitch(pitch).catch((error) => logSyncError('add pitch', error))
       return pitch
     },
     [],
   )
 
   const undoLastPitch = useCallback((eventId: string, playerId: string) => {
+    let removedId: string | null = null
     setData((prev) => {
-      let removed = false
       const pitches = [...prev.pitches]
       for (let i = pitches.length - 1; i >= 0; i--) {
         const p = pitches[i]
         if (p && p.eventId === eventId && p.playerId === playerId) {
+          removedId = p.id
           pitches.splice(i, 1)
-          removed = true
           break
         }
       }
-      if (!removed) return prev
+      if (!removedId) return prev
       return persist({ ...prev, pitches })
     })
+    if (removedId) {
+      void deletePitch(removedId).catch((error) => logSyncError('undo pitch', error))
+    }
   }, [])
 
   const setCurrentEventId = useCallback((id: string | null) => {
@@ -138,6 +186,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const value = useMemo<StoreValue>(
     () => ({
       ...data,
+      players: [...data.players].sort(
+        (a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name),
+      ),
       addPlayer,
       removePlayer,
       createEvent,

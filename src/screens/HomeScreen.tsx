@@ -17,9 +17,14 @@ export function HomeScreen({ onNavigate }: Props) {
   return (
     <div className="screen screen-home">
       <header className="home-hero">
-        <p className="eyebrow">Coach tools</p>
-        <h1>K-Zone</h1>
-        <p className="lede">Track pitches by dragging the ball. Built for the dugout.</p>
+        <div className="home-brand">
+          <img className="home-logo" src="/warhawks-logo.png" alt="" />
+          <div className="home-brand-text">
+            <p className="eyebrow">Warhawks</p>
+            <h1>K-Zone</h1>
+          </div>
+        </div>
+        <p className="lede">Track pitches by dragging the ball.</p>
       </header>
 
       <button type="button" className="btn btn-primary btn-xl" onClick={() => onNavigate('setup')}>

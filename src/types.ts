@@ -6,6 +6,7 @@ export type HeatmapScope = 'event' | 'practices' | 'games' | 'all'
 export type Player = {
   id: string
   name: string
+  sortOrder: number
   createdAt: string
 }
 

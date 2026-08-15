@@ -1,6 +1,5 @@
-import type { AppData } from './types'
-
-/** Local persistence. Replace loadData/saveData with Supabase queries later. */
+import type { AppData, Player } from './types'
+import { DEFAULT_ROSTER } from './roster'
 
 export const STORAGE_KEY = 'kzone-data-v1'
 
@@ -12,29 +11,53 @@ const empty: AppData = {
   currentPlayerId: null,
 }
 
+export function newId(): string {
+  return crypto.randomUUID()
+}
+
+export function seedPlayers(existing: Player[] = []): Player[] {
+  const have = new Set(existing.map((p) => p.name.toLowerCase()))
+  const maxOrder = existing.reduce((max, p) => Math.max(max, p.sortOrder), 0)
+  const added: Player[] = []
+  DEFAULT_ROSTER.forEach((name, index) => {
+    if (have.has(name.toLowerCase())) return
+    added.push({
+      id: newId(),
+      name,
+      sortOrder: maxOrder + index + 1,
+      createdAt: new Date().toISOString(),
+    })
+  })
+  return [...existing, ...added].sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))
+}
+
 export function loadData(): AppData {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return empty
+    if (!raw) {
+      return { ...empty, players: seedPlayers() }
+    }
     const parsed = JSON.parse(raw) as Partial<AppData>
+    const players = seedPlayers(
+      (parsed.players ?? []).map((p) => ({
+        ...p,
+        sortOrder: p.sortOrder ?? 0,
+      })),
+    )
     return {
-      players: parsed.players ?? [],
+      players,
       events: parsed.events ?? [],
       pitches: parsed.pitches ?? [],
       currentEventId: parsed.currentEventId ?? null,
       currentPlayerId: parsed.currentPlayerId ?? null,
     }
   } catch {
-    return empty
+    return { ...empty, players: seedPlayers() }
   }
 }
 
 export function saveData(data: AppData): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
-}
-
-export function newId(): string {
-  return crypto.randomUUID()
 }
 
 export function todayInputValue(): string {
