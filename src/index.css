@@ -332,6 +332,21 @@ select {
   gap: 4px;
 }
 
+.event-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.event-row .event-card {
+  flex: 1;
+  min-width: 0;
+}
+
+.event-row .btn-sm {
+  align-self: center;
+}
+
 .event-card-title {
   font-weight: 700;
   font-size: 17px;

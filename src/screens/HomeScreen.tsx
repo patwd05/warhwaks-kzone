@@ -7,11 +7,16 @@ type Props = {
 }
 
 export function HomeScreen({ onNavigate }: Props) {
-  const { events, pitches, setCurrentEventId } = useStore()
+  const { events, pitches, setCurrentEventId, removeEvent } = useStore()
 
   function openEvent(id: string) {
     setCurrentEventId(id)
     onNavigate('track')
+  }
+
+  function deleteEvent(id: string, title: string) {
+    if (!window.confirm(`Remove ${title} and all of its pitches?`)) return
+    removeEvent(id)
   }
 
   return (
@@ -52,13 +57,20 @@ export function HomeScreen({ onNavigate }: Props) {
                   ? `Practice · ${event.opponent}`
                   : 'Practice'
             return (
-              <li key={event.id}>
+              <li key={event.id} className="event-row">
                 <button type="button" className="event-card" onClick={() => openEvent(event.id)}>
                   <span className={`pill pill-${event.type}`}>{event.type}</span>
                   <span className="event-card-title">{title}</span>
                   <span className="event-card-meta">
                     {formatDate(event.date)} · {count} {count === 1 ? 'pitch' : 'pitches'}
                   </span>
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => deleteEvent(event.id, title)}
+                >
+                  Remove
                 </button>
               </li>
             )

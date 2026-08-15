@@ -14,6 +14,7 @@ import {
   insertEvent,
   insertPitch,
   insertPlayer,
+  deleteEvent,
   logSyncError,
 } from './api'
 import type { AppData, EventType, GameEvent, Pitch, Player } from './types'
@@ -28,6 +29,7 @@ type StoreValue = AppData & {
     date: string
     opponent: string
   }) => GameEvent
+  removeEvent: (id: string) => void
   addPitch: (input: {
     eventId: string
     playerId: string
@@ -131,6 +133,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [],
   )
 
+  const removeEvent = useCallback((id: string) => {
+    setData((prev) =>
+      persist({
+        ...prev,
+        events: prev.events.filter((e) => e.id !== id),
+        pitches: prev.pitches.filter((p) => p.eventId !== id),
+        currentEventId: prev.currentEventId === id ? null : prev.currentEventId,
+      }),
+    )
+    void deleteEvent(id).catch((error) => logSyncError('remove event', error))
+  }, [])
+
   const addPitch = useCallback(
     (input: {
       eventId: string
@@ -192,6 +206,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       addPlayer,
       removePlayer,
       createEvent,
+      removeEvent,
       addPitch,
       undoLastPitch,
       setCurrentEventId,
@@ -202,6 +217,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       addPlayer,
       removePlayer,
       createEvent,
+      removeEvent,
       addPitch,
       undoLastPitch,
       setCurrentEventId,
