@@ -119,8 +119,10 @@ export async function insertEvent(event: GameEvent): Promise<void> {
 
 export async function deleteEvent(id: string): Promise<void> {
   if (!supabase) return
-  const { error } = await supabase.from('events').delete().eq('id', id)
-  await throwIfError(error)
+  const pitchesRes = await supabase.from('pitches').delete().eq('event_id', id)
+  await throwIfError(pitchesRes.error)
+  const eventsRes = await supabase.from('events').delete().eq('id', id)
+  await throwIfError(eventsRes.error)
 }
 
 export async function insertPitch(pitch: Pitch): Promise<void> {

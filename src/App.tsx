@@ -17,7 +17,8 @@ export default function App() {
         {view === 'setup' && <EventSetupScreen onNavigate={setView} />}
         {view === 'roster' && <RosterScreen onNavigate={setView} />}
         {view === 'track' && <TrackScreen onNavigate={setView} />}
-        {view === 'heatmap' && <HeatmapScreen onNavigate={setView} />}
+        {view === 'heatmap' && <HeatmapScreen onNavigate={setView} mode="session" />}
+        {view === 'player-heatmap' && <HeatmapScreen onNavigate={setView} mode="player" />}
       </div>
     </StoreProvider>
   )

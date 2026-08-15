@@ -64,6 +64,7 @@ function persist(next: AppData) {
 const eventSaveQueue = new Map<string, Promise<void>>()
 
 function applyRemote(prev: AppData, remote: RemoteData): AppData {
+  const removed = new Set(prev.removedEventIds ?? [])
   const players = remote.players.length > 0 ? remote.players : prev.players
 
   let currentPlayerId = prev.currentPlayerId
@@ -78,13 +79,23 @@ function applyRemote(prev: AppData, remote: RemoteData): AppData {
       null
   }
 
-  const remoteEventIds = new Set(remote.events.map((e) => e.id))
-  const pendingEvents = prev.events.filter((e) => !remoteEventIds.has(e.id))
-  const events = [...pendingEvents, ...remote.events]
+  const remoteEvents = remote.events.filter((e) => !removed.has(e.id))
+  const remotePitches = remote.pitches.filter((p) => !removed.has(p.eventId))
 
-  const remotePitchIds = new Set(remote.pitches.map((p) => p.id))
-  const pendingPitches = prev.pitches.filter((p) => !remotePitchIds.has(p.id))
-  const pitches = [...remote.pitches, ...pendingPitches]
+  const remoteEventIds = new Set(remoteEvents.map((e) => e.id))
+  const pendingEvents = prev.events.filter((e) => !remoteEventIds.has(e.id) && !removed.has(e.id))
+  const events = [...pendingEvents, ...remoteEvents]
+
+  const remotePitchIds = new Set(remotePitches.map((p) => p.id))
+  const pendingPitches = prev.pitches.filter(
+    (p) => !remotePitchIds.has(p.id) && !removed.has(p.eventId),
+  )
+  const pitches = [...remotePitches, ...pendingPitches]
+
+  const removedEventIds = [...removed].filter(
+    (id) =>
+      remote.events.some((e) => e.id === id) || remote.pitches.some((p) => p.eventId === id),
+  )
 
   return persist({
     ...prev,
@@ -92,6 +103,7 @@ function applyRemote(prev: AppData, remote: RemoteData): AppData {
     events,
     pitches,
     currentPlayerId,
+    removedEventIds,
   })
 }
 
@@ -125,9 +137,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const next = applyRemote(prev, remote)
           const remoteIds = new Set(remote.events.map((e) => e.id))
           for (const event of next.events) {
-            if (!remoteIds.has(event.id)) {
+            if (!remoteIds.has(event.id) && !next.removedEventIds.includes(event.id)) {
               void insertEvent(event).catch((error) => logSyncError('sync event', error))
             }
+          }
+          for (const id of next.removedEventIds) {
+            void deleteEvent(id).catch((error) => logSyncError('remove event', error))
           }
           return next
         })
@@ -220,6 +235,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           ...prev,
           events: [event, ...prev.events],
           currentEventId: event.id,
+          currentPlayerId: null,
         }),
       )
       const save = insertEvent(event)
@@ -240,12 +256,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   )
 
   const removeEvent = useCallback((id: string) => {
+    eventSaveQueue.delete(id)
     setData((prev) =>
       persist({
         ...prev,
         events: prev.events.filter((e) => e.id !== id),
         pitches: prev.pitches.filter((p) => p.eventId !== id),
         currentEventId: prev.currentEventId === id ? null : prev.currentEventId,
+        removedEventIds: prev.removedEventIds.includes(id)
+          ? prev.removedEventIds
+          : [...prev.removedEventIds, id],
       }),
     )
     void deleteEvent(id).catch((error) => {
@@ -274,8 +294,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setData((prev) => persist({ ...prev, pitches: [...prev.pitches, pitch] }))
       void (async () => {
         try {
+          if (dataRef.current.removedEventIds.includes(pitch.eventId)) return
           const pendingEvent = eventSaveQueue.get(pitch.eventId)
           if (pendingEvent) await pendingEvent
+          if (dataRef.current.removedEventIds.includes(pitch.eventId)) return
           const event = dataRef.current.events.find((item) => item.id === pitch.eventId)
           if (event) {
             await insertEvent({
@@ -283,6 +305,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               date: event.date || todayInputValue(),
             })
           }
+          if (dataRef.current.removedEventIds.includes(pitch.eventId)) return
           await insertPitch(pitch)
           setCloudError(null)
         } catch (error) {
@@ -332,9 +355,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       cloudStatus,
       cloudError,
       refreshCloud,
-      players: [...data.players].sort(
-        (a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name),
-      ),
+      players: [...data.players].sort((a, b) => a.name.localeCompare(b.name)),
       addPlayer,
       removePlayer,
       createEvent,

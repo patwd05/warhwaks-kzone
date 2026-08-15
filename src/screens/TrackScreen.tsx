@@ -208,7 +208,7 @@ export function TrackScreen({ onNavigate }: Props) {
           </div>
         )}
         {!selectedPlayerId && (
-          <p className="field-hint">Select a player, then drag the ball to the pitch.</p>
+          <p className="field-hint">Select a Pitcher, then drag the ball to the pitch.</p>
         )}
         {selectedPlayerId && !dragging && !result && (
           <p className="field-hint">Drag the ball to where the pitch crossed.</p>

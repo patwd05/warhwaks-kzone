@@ -1,6 +1,6 @@
 export type EventType = 'practice' | 'game'
 export type PitchResult = 'ball' | 'strike'
-export type View = 'home' | 'setup' | 'roster' | 'track' | 'heatmap'
+export type View = 'home' | 'setup' | 'roster' | 'track' | 'heatmap' | 'player-heatmap'
 export type HeatmapScope = 'event' | 'practices' | 'games' | 'all'
 
 export type Player = {
@@ -34,4 +34,5 @@ export type AppData = {
   pitches: Pitch[]
   currentEventId: string | null
   currentPlayerId: string | null
+  removedEventIds: string[]
 }

@@ -8,8 +8,13 @@ type Props = {
 }
 
 export function RosterScreen({ onNavigate }: Props) {
-  const { players, pitches, addPlayer, removePlayer } = useStore()
+  const { players, pitches, addPlayer, removePlayer, setCurrentPlayerId } = useStore()
   const [adding, setAdding] = useState(false)
+
+  function openHeatmap(id: string) {
+    setCurrentPlayerId(id)
+    onNavigate('player-heatmap')
+  }
 
   return (
     <div className="screen">
@@ -28,17 +33,19 @@ export function RosterScreen({ onNavigate }: Props) {
         <p className="empty-copy">Add the kids you want to track. You can also add them from the pitch screen.</p>
       )}
 
+      <p className="empty-copy">Tap a player to see their heatmap.</p>
+
       <ul className="roster-list">
         {players.map((player) => {
           const count = pitches.filter((p) => p.playerId === player.id).length
           return (
             <li key={player.id} className="roster-row">
-              <div>
+              <button type="button" className="roster-open" onClick={() => openHeatmap(player.id)}>
                 <strong>{player.name}</strong>
                 <span>
                   {count} {count === 1 ? 'pitch' : 'pitches'}
                 </span>
-              </div>
+              </button>
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"

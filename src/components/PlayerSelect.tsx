@@ -17,7 +17,7 @@ export function PlayerSelect({
 }: Props) {
   return (
     <div className="player-select">
-      <label htmlFor="player-select">Player</label>
+      <label htmlFor="player-select">{allowAll ? 'Player' : 'Pitcher'}</label>
       <div className="player-select-row">
         <select
           id="player-select"
@@ -32,7 +32,7 @@ export function PlayerSelect({
           }}
         >
           <option value="" disabled={!allowAll}>
-            {allowAll ? 'All players' : players.length ? 'Select player' : 'No players yet'}
+            {allowAll ? 'All players' : players.length ? 'Select a Pitcher' : 'No players yet'}
           </option>
           {players.map((p) => (
             <option key={p.id} value={p.id}>

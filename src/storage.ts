@@ -9,6 +9,7 @@ const empty: AppData = {
   pitches: [],
   currentEventId: null,
   currentPlayerId: null,
+  removedEventIds: [],
 }
 
 export function newId(): string {
@@ -28,7 +29,7 @@ export function seedPlayers(existing: Player[] = []): Player[] {
       createdAt: new Date().toISOString(),
     })
   })
-  return [...existing, ...added].sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))
+  return [...existing, ...added].sort((a, b) => a.name.localeCompare(b.name))
 }
 
 export function loadData(): AppData {
@@ -50,6 +51,7 @@ export function loadData(): AppData {
       pitches: parsed.pitches ?? [],
       currentEventId: parsed.currentEventId ?? null,
       currentPlayerId: parsed.currentPlayerId ?? null,
+      removedEventIds: parsed.removedEventIds ?? [],
     }
   } catch {
     return { ...empty, players: seedPlayers() }
@@ -76,4 +78,9 @@ export function formatDate(isoDate: string): string {
     month: 'short',
     day: 'numeric',
   })
+}
+
+export function formatEventTitle(event: { type: 'practice' | 'game'; opponent: string }): string {
+  if (event.type === 'game') return event.opponent ? `vs ${event.opponent}` : 'Game'
+  return event.opponent ? `Practice · ${event.opponent}` : 'Practice'
 }
