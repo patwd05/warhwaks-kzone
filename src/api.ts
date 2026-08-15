@@ -104,13 +104,16 @@ export async function deletePlayer(id: string): Promise<void> {
 
 export async function insertEvent(event: GameEvent): Promise<void> {
   if (!supabase) return
-  const { error } = await supabase.from('events').insert({
-    id: event.id,
-    type: event.type,
-    event_date: event.date,
-    opponent: event.opponent,
-    created_at: event.createdAt,
-  })
+  const { error } = await supabase.from('events').upsert(
+    {
+      id: event.id,
+      type: event.type,
+      event_date: event.date,
+      opponent: event.opponent,
+      created_at: event.createdAt,
+    },
+    { onConflict: 'id' },
+  )
   await throwIfError(error)
 }
 

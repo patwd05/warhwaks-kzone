@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
@@ -18,7 +19,7 @@ import {
   logSyncError,
 } from './api'
 import type { AppData, EventType, GameEvent, Pitch, Player } from './types'
-import { loadData, newId, saveData } from './storage'
+import { loadData, newId, saveData, todayInputValue } from './storage'
 import { isSupabaseConfigured, supabase } from './supabase'
 
 export type CloudStatus = 'off' | 'connecting' | 'on' | 'error'
@@ -112,13 +113,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     isSupabaseConfigured ? 'connecting' : 'off',
   )
   const [cloudError, setCloudError] = useState<string | null>(null)
+  const dataRef = useRef(data)
+  dataRef.current = data
 
   const refreshCloud = useCallback(() => {
     if (!isSupabaseConfigured) return
     setCloudStatus((status) => (status === 'off' ? 'off' : 'connecting'))
     fetchRemoteData()
       .then((remote) => {
-        setData((prev) => applyRemote(prev, remote))
+        setData((prev) => {
+          const next = applyRemote(prev, remote)
+          const remoteIds = new Set(remote.events.map((e) => e.id))
+          for (const event of next.events) {
+            if (!remoteIds.has(event.id)) {
+              void insertEvent(event).catch((error) => logSyncError('sync event', error))
+            }
+          }
+          return next
+        })
         setCloudStatus('on')
         setCloudError(null)
       })
@@ -264,6 +276,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         try {
           const pendingEvent = eventSaveQueue.get(pitch.eventId)
           if (pendingEvent) await pendingEvent
+          const event = dataRef.current.events.find((item) => item.id === pitch.eventId)
+          if (event) {
+            await insertEvent({
+              ...event,
+              date: event.date || todayInputValue(),
+            })
+          }
           await insertPitch(pitch)
           setCloudError(null)
         } catch (error) {
