@@ -49,6 +49,26 @@ grant select, insert, update, delete on public.players to anon, authenticated;
 grant select, insert, update, delete on public.events to anon, authenticated;
 grant select, insert, update, delete on public.pitches to anon, authenticated;
 
+alter table public.players replica identity full;
+alter table public.events replica identity full;
+alter table public.pitches replica identity full;
+
+do $$
+begin
+  begin
+    alter publication supabase_realtime add table public.players;
+  exception when duplicate_object then null;
+  end;
+  begin
+    alter publication supabase_realtime add table public.events;
+  exception when duplicate_object then null;
+  end;
+  begin
+    alter publication supabase_realtime add table public.pitches;
+  exception when duplicate_object then null;
+  end;
+end $$;
+
 insert into public.players (name, sort_order)
 select names.name, names.sort_order
 from (

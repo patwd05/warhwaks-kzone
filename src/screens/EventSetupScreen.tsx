@@ -12,12 +12,22 @@ export function EventSetupScreen({ onNavigate }: Props) {
   const [type, setType] = useState<EventType>('practice')
   const [date, setDate] = useState(todayInputValue)
   const [opponent, setOpponent] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  function submit(e: FormEvent) {
+  async function submit(e: FormEvent) {
     e.preventDefault()
     if (type === 'game' && !opponent.trim()) return
-    createEvent({ type, date, opponent })
-    onNavigate('track')
+    setSaving(true)
+    setError(null)
+    try {
+      await createEvent({ type, date, opponent })
+      onNavigate('track')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save event')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const canStart = type === 'practice' || opponent.trim().length > 0
@@ -66,8 +76,10 @@ export function EventSetupScreen({ onNavigate }: Props) {
           onChange={(e) => setOpponent(e.target.value)}
         />
 
-        <button type="submit" className="btn btn-primary btn-xl" disabled={!canStart}>
-          Start tracking
+        {error && <p className="cloud-error">{error}</p>}
+
+        <button type="submit" className="btn btn-primary btn-xl" disabled={!canStart || saving}>
+          {saving ? 'Saving…' : 'Start tracking'}
         </button>
       </form>
     </div>

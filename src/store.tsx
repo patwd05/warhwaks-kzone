@@ -19,16 +19,27 @@ import {
 } from './api'
 import type { AppData, EventType, GameEvent, Pitch, Player } from './types'
 import { loadData, newId, saveData } from './storage'
-import { isSupabaseConfigured } from './supabase'
+import { isSupabaseConfigured, supabase } from './supabase'
+
+export type CloudStatus = 'off' | 'connecting' | 'on' | 'error'
+
+type RemoteData = {
+  players: Player[]
+  events: GameEvent[]
+  pitches: Pitch[]
+}
 
 type StoreValue = AppData & {
+  cloudStatus: CloudStatus
+  cloudError: string | null
+  refreshCloud: () => void
   addPlayer: (name: string) => Player
   removePlayer: (id: string) => void
   createEvent: (input: {
     type: EventType
     date: string
     opponent: string
-  }) => GameEvent
+  }) => Promise<GameEvent>
   removeEvent: (id: string) => void
   addPitch: (input: {
     eventId: string
@@ -49,53 +60,122 @@ function persist(next: AppData) {
   return next
 }
 
-export function StoreProvider({ children }: { children: ReactNode }) {
-  const [data, setData] = useState<AppData>(() => loadData())
+const eventSaveQueue = new Map<string, Promise<void>>()
 
-  useEffect(() => {
+function applyRemote(prev: AppData, remote: RemoteData): AppData {
+  const players = remote.players.length > 0 ? remote.players : prev.players
+
+  let currentPlayerId = prev.currentPlayerId
+  if (
+    remote.players.length > 0 &&
+    currentPlayerId &&
+    !remote.players.some((p) => p.id === currentPlayerId)
+  ) {
+    const previous = prev.players.find((p) => p.id === currentPlayerId)
+    currentPlayerId =
+      remote.players.find((p) => p.name.toLowerCase() === previous?.name.toLowerCase())?.id ??
+      null
+  }
+
+  const remoteEventIds = new Set(remote.events.map((e) => e.id))
+  const pendingEvents = prev.events.filter((e) => !remoteEventIds.has(e.id))
+  const events = [...pendingEvents, ...remote.events]
+
+  const remotePitchIds = new Set(remote.pitches.map((p) => p.id))
+  const pendingPitches = prev.pitches.filter((p) => !remotePitchIds.has(p.id))
+  const pitches = [...remote.pitches, ...pendingPitches]
+
+  return persist({
+    ...prev,
+    players,
+    events,
+    pitches,
+    currentPlayerId,
+  })
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Cloud sync failed'
+}
+
+export function StoreProvider({ children }: { children: ReactNode }) {
+  const [data, setData] = useState<AppData>(() => {
+    const local = loadData()
+    if (!isSupabaseConfigured) return local
+    return {
+      ...local,
+      players: [],
+      currentPlayerId: null,
+    }
+  })
+  const [cloudStatus, setCloudStatus] = useState<CloudStatus>(
+    isSupabaseConfigured ? 'connecting' : 'off',
+  )
+  const [cloudError, setCloudError] = useState<string | null>(null)
+
+  const refreshCloud = useCallback(() => {
     if (!isSupabaseConfigured) return
-    let cancelled = false
+    setCloudStatus((status) => (status === 'off' ? 'off' : 'connecting'))
     fetchRemoteData()
       .then((remote) => {
-        if (cancelled) return
-        setData((prev) => {
-          const players = remote.players.length > 0 ? remote.players : prev.players
-          if (remote.players.length === 0 && prev.players.length > 0) {
-            for (const player of prev.players) {
-              void insertPlayer(player).catch((error) => logSyncError('seed player', error))
-            }
-          }
-          return persist({
-            ...prev,
-            players,
-            events: remote.events,
-            pitches: remote.pitches,
-            currentEventId: prev.currentEventId,
-            currentPlayerId: prev.currentPlayerId,
-          })
-        })
+        setData((prev) => applyRemote(prev, remote))
+        setCloudStatus('on')
+        setCloudError(null)
       })
-      .catch((error) => logSyncError('load', error))
-    return () => {
-      cancelled = true
-    }
+      .catch((error) => {
+        logSyncError('load', error)
+        setCloudStatus('error')
+        setCloudError(errorMessage(error))
+      })
   }, [])
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) return
+    const client = supabase
+
+    refreshCloud()
+
+    const onVis = () => {
+      if (document.visibilityState === 'visible') refreshCloud()
+    }
+    window.addEventListener('focus', refreshCloud)
+    document.addEventListener('visibilitychange', onVis)
+
+    const channel = client
+      .channel('kzone-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'events' }, refreshCloud)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pitches' }, refreshCloud)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'players' }, refreshCloud)
+      .subscribe()
+
+    return () => {
+      window.removeEventListener('focus', refreshCloud)
+      document.removeEventListener('visibilitychange', onVis)
+      void client.removeChannel(channel)
+    }
+  }, [refreshCloud])
 
   const addPlayer = useCallback((name: string) => {
     const player: Player = {
       id: newId(),
       name: name.trim(),
-      sortOrder: Date.now(),
+      sortOrder: Date.now() % 1_000_000,
       createdAt: new Date().toISOString(),
     }
-    setData((prev) =>
-      persist({
+    setData((prev) => {
+      const maxOrder = prev.players.reduce((max, p) => Math.max(max, p.sortOrder), 0)
+      const nextPlayer = { ...player, sortOrder: maxOrder + 1 }
+      player.sortOrder = nextPlayer.sortOrder
+      return persist({
         ...prev,
-        players: [...prev.players, player],
-        currentPlayerId: prev.currentPlayerId ?? player.id,
-      }),
-    )
-    void insertPlayer(player).catch((error) => logSyncError('add player', error))
+        players: [...prev.players, nextPlayer],
+        currentPlayerId: prev.currentPlayerId ?? nextPlayer.id,
+      })
+    })
+    void insertPlayer(player).catch((error) => {
+      logSyncError('add player', error)
+      setCloudError(errorMessage(error))
+    })
     return player
   }, [])
 
@@ -108,11 +188,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         currentPlayerId: prev.currentPlayerId === id ? null : prev.currentPlayerId,
       }),
     )
-    void deletePlayer(id).catch((error) => logSyncError('remove player', error))
+    void deletePlayer(id).catch((error) => {
+      logSyncError('remove player', error)
+      setCloudError(errorMessage(error))
+    })
   }, [])
 
   const createEvent = useCallback(
-    (input: { type: EventType; date: string; opponent: string }) => {
+    async (input: { type: EventType; date: string; opponent: string }) => {
       const event: GameEvent = {
         id: newId(),
         type: input.type,
@@ -127,7 +210,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           currentEventId: event.id,
         }),
       )
-      void insertEvent(event).catch((error) => logSyncError('create event', error))
+      const save = insertEvent(event)
+      eventSaveQueue.set(event.id, save)
+      try {
+        await save
+        setCloudError(null)
+      } catch (error) {
+        logSyncError('create event', error)
+        setCloudError(errorMessage(error))
+        throw error
+      } finally {
+        eventSaveQueue.delete(event.id)
+      }
       return event
     },
     [],
@@ -142,7 +236,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         currentEventId: prev.currentEventId === id ? null : prev.currentEventId,
       }),
     )
-    void deleteEvent(id).catch((error) => logSyncError('remove event', error))
+    void deleteEvent(id).catch((error) => {
+      logSyncError('remove event', error)
+      setCloudError(errorMessage(error))
+    })
   }, [])
 
   const addPitch = useCallback(
@@ -163,7 +260,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         createdAt: new Date().toISOString(),
       }
       setData((prev) => persist({ ...prev, pitches: [...prev.pitches, pitch] }))
-      void insertPitch(pitch).catch((error) => logSyncError('add pitch', error))
+      void (async () => {
+        try {
+          const pendingEvent = eventSaveQueue.get(pitch.eventId)
+          if (pendingEvent) await pendingEvent
+          await insertPitch(pitch)
+          setCloudError(null)
+        } catch (error) {
+          logSyncError('add pitch', error)
+          setCloudError(errorMessage(error))
+        }
+      })()
       return pitch
     },
     [],
@@ -185,7 +292,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return persist({ ...prev, pitches })
     })
     if (removedId) {
-      void deletePitch(removedId).catch((error) => logSyncError('undo pitch', error))
+      void deletePitch(removedId).catch((error) => {
+        logSyncError('undo pitch', error)
+        setCloudError(errorMessage(error))
+      })
     }
   }, [])
 
@@ -200,6 +310,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const value = useMemo<StoreValue>(
     () => ({
       ...data,
+      cloudStatus,
+      cloudError,
+      refreshCloud,
       players: [...data.players].sort(
         (a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name),
       ),
@@ -214,6 +327,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }),
     [
       data,
+      cloudStatus,
+      cloudError,
+      refreshCloud,
       addPlayer,
       removePlayer,
       createEvent,

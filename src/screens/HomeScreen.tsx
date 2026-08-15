@@ -7,7 +7,8 @@ type Props = {
 }
 
 export function HomeScreen({ onNavigate }: Props) {
-  const { events, pitches, setCurrentEventId, removeEvent } = useStore()
+  const { events, pitches, setCurrentEventId, removeEvent, cloudStatus, cloudError, refreshCloud } =
+    useStore()
 
   function openEvent(id: string) {
     setCurrentEventId(id)
@@ -30,6 +31,12 @@ export function HomeScreen({ onNavigate }: Props) {
           </div>
         </div>
         <p className="lede">Track pitches by dragging the ball.</p>
+        <button type="button" className={`cloud-pill cloud-pill--${cloudStatus}`} onClick={refreshCloud}>
+          {cloudStatus === 'on' && 'Cloud synced'}
+          {cloudStatus === 'connecting' && 'Connecting to cloud…'}
+          {cloudStatus === 'off' && 'Saving on this device only'}
+          {cloudStatus === 'error' && (cloudError ?? 'Cloud sync failed')}
+        </button>
       </header>
 
       <button type="button" className="btn btn-primary btn-xl" onClick={() => onNavigate('setup')}>

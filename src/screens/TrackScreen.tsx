@@ -28,6 +28,7 @@ export function TrackScreen({ onNavigate }: Props) {
     addPitch,
     undoLastPitch,
     setCurrentPlayerId,
+    cloudError,
   } = useStore()
 
   const fieldRef = useRef<HTMLDivElement>(null)
@@ -49,12 +50,15 @@ export function TrackScreen({ onNavigate }: Props) {
   }, [])
 
   const event = events.find((e) => e.id === currentEventId)
+  const selectedPlayerId = players.some((p) => p.id === currentPlayerId)
+    ? currentPlayerId
+    : null
   const playerPitches = useMemo(
     () =>
       pitches.filter(
-        (p) => p.eventId === currentEventId && p.playerId === currentPlayerId,
+        (p) => p.eventId === currentEventId && p.playerId === selectedPlayerId,
       ),
-    [pitches, currentEventId, currentPlayerId],
+    [pitches, currentEventId, selectedPlayerId],
   )
   const strikes = playerPitches.filter((p) => p.result === 'strike').length
   const balls = playerPitches.filter((p) => p.result === 'ball').length
@@ -78,10 +82,7 @@ export function TrackScreen({ onNavigate }: Props) {
   }, [])
 
   function onPointerDown(e: PointerEvent<HTMLDivElement>) {
-    if (locked || !currentPlayerId) {
-      if (!currentPlayerId) setAdding(true)
-      return
-    }
+    if (locked || !selectedPlayerId) return
     e.preventDefault()
     pointerType.current = e.pointerType === 'touch' ? 'touch' : e.pointerType === 'pen' ? 'pen' : 'mouse'
     const field = fieldRef.current
@@ -120,10 +121,10 @@ export function TrackScreen({ onNavigate }: Props) {
     setResult(call)
     setZoneMode(call)
 
-    if (currentEventId && currentPlayerId) {
+    if (currentEventId && selectedPlayerId) {
       addPitch({
         eventId: currentEventId,
-        playerId: currentPlayerId,
+        playerId: selectedPlayerId,
         x: next.x,
         y: next.y,
         result: call,
@@ -170,9 +171,9 @@ export function TrackScreen({ onNavigate }: Props) {
         <button
           type="button"
           className="back-btn"
-          disabled={!currentPlayerId || playerPitches.length === 0 || locked}
+          disabled={!selectedPlayerId || playerPitches.length === 0 || locked}
           onClick={() => {
-            if (currentEventId && currentPlayerId) undoLastPitch(currentEventId, currentPlayerId)
+            if (currentEventId && selectedPlayerId) undoLastPitch(currentEventId, selectedPlayerId)
           }}
         >
           Undo
@@ -181,12 +182,13 @@ export function TrackScreen({ onNavigate }: Props) {
 
       <PlayerSelect
         players={players}
-        value={currentPlayerId}
+        value={selectedPlayerId}
         onChange={setCurrentPlayerId}
         onAddPlayer={() => setAdding(true)}
       />
 
       <StatsBar pitches={playerPitches.length} strikes={strikes} balls={balls} />
+      {cloudError && <p className="cloud-error">{cloudError}</p>}
 
       <div className="field-wrap" ref={fieldRef}>
         <Field zoneMode={dragging || result ? zoneMode : 'idle'}>
@@ -205,10 +207,10 @@ export function TrackScreen({ onNavigate }: Props) {
             {result === 'strike' ? 'STRIKE' : 'BALL'}
           </div>
         )}
-        {!currentPlayerId && (
+        {!selectedPlayerId && (
           <p className="field-hint">Select a player, then drag the ball to the pitch.</p>
         )}
-        {currentPlayerId && !dragging && !result && (
+        {selectedPlayerId && !dragging && !result && (
           <p className="field-hint">Drag the ball to where the pitch crossed.</p>
         )}
       </div>

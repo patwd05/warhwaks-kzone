@@ -122,16 +122,25 @@ export async function deleteEvent(id: string): Promise<void> {
 
 export async function insertPitch(pitch: Pitch): Promise<void> {
   if (!supabase) return
-  const { error } = await supabase.from('pitches').insert({
-    id: pitch.id,
-    event_id: pitch.eventId,
-    player_id: pitch.playerId,
-    x: pitch.x,
-    y: pitch.y,
-    result: pitch.result,
-    created_at: pitch.createdAt,
-  })
-  await throwIfError(error)
+
+  let lastMessage = 'Could not save pitch'
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const { error } = await supabase.from('pitches').insert({
+      id: pitch.id,
+      event_id: pitch.eventId,
+      player_id: pitch.playerId,
+      x: pitch.x,
+      y: pitch.y,
+      result: pitch.result,
+      created_at: pitch.createdAt,
+    })
+    if (!error) return
+    lastMessage = error.message
+    const retryable = error.message.includes('foreign key') || error.code === '23503'
+    if (!retryable || attempt === 3) break
+    await new Promise((resolve) => setTimeout(resolve, 350 * (attempt + 1)))
+  }
+  throw new Error(lastMessage)
 }
 
 export async function deletePitch(id: string): Promise<void> {
