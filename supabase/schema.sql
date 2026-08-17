@@ -49,6 +49,29 @@ grant select, insert, update, delete on public.players to anon, authenticated;
 grant select, insert, update, delete on public.events to anon, authenticated;
 grant select, insert, update, delete on public.pitches to anon, authenticated;
 
+-- At-bats (games only). If this database already exists, run from here down.
+create table if not exists public.at_bats (
+  id uuid primary key default gen_random_uuid(),
+  event_id uuid not null references public.events (id) on delete cascade,
+  player_id uuid not null references public.players (id) on delete cascade,
+  outcome text not null check (outcome in ('walk', 'k', 'hbp', 'hit', 'error')),
+  pitch_ids uuid[] not null default '{}',
+  pitches integer not null default 0,
+  strikes integer not null default 0,
+  balls integer not null default 0,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists at_bats_event_id_idx on public.at_bats (event_id);
+create index if not exists at_bats_player_id_idx on public.at_bats (player_id);
+create index if not exists at_bats_created_at_idx on public.at_bats (created_at);
+
+alter table public.at_bats enable row level security;
+drop policy if exists "at_bats_all" on public.at_bats;
+create policy "at_bats_all" on public.at_bats for all using (true) with check (true);
+grant select, insert, update, delete on public.at_bats to anon, authenticated;
+alter table public.at_bats replica identity full;
+
 alter table public.players replica identity full;
 alter table public.events replica identity full;
 alter table public.pitches replica identity full;
@@ -65,6 +88,10 @@ begin
   end;
   begin
     alter publication supabase_realtime add table public.pitches;
+  exception when duplicate_object then null;
+  end;
+  begin
+    alter publication supabase_realtime add table public.at_bats;
   exception when duplicate_object then null;
   end;
 end $$;

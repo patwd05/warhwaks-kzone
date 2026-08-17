@@ -1,4 +1,4 @@
-import type { AppData, Player } from './types'
+import type { AppData, AtBat, Pitch, Player } from './types'
 import { DEFAULT_ROSTER } from './roster'
 
 export const STORAGE_KEY = 'kzone-data-v1'
@@ -7,11 +7,13 @@ const empty: AppData = {
   players: [],
   events: [],
   pitches: [],
+  atBats: [],
   currentEventId: null,
   currentPlayerId: null,
   removedEventIds: [],
   unsyncedEventIds: [],
   unsyncedPitchIds: [],
+  unsyncedAtBatIds: [],
 }
 
 export function newId(): string {
@@ -51,11 +53,13 @@ export function loadData(): AppData {
       players,
       events: parsed.events ?? [],
       pitches: parsed.pitches ?? [],
+      atBats: parsed.atBats ?? [],
       currentEventId: parsed.currentEventId ?? null,
       currentPlayerId: parsed.currentPlayerId ?? null,
       removedEventIds: parsed.removedEventIds ?? [],
       unsyncedEventIds: parsed.unsyncedEventIds ?? [],
       unsyncedPitchIds: parsed.unsyncedPitchIds ?? [],
+      unsyncedAtBatIds: parsed.unsyncedAtBatIds ?? [],
     }
   } catch {
     return { ...empty, players: seedPlayers() }
@@ -87,4 +91,25 @@ export function formatDate(isoDate: string): string {
 export function formatEventTitle(event: { type: 'practice' | 'game'; opponent: string }): string {
   if (event.type === 'game') return event.opponent ? `vs ${event.opponent}` : 'Game'
   return event.opponent ? `Practice · ${event.opponent}` : 'Practice'
+}
+
+export function claimedPitchIds(atBats: AtBat[], eventId: string, playerId: string): Set<string> {
+  const claimed = new Set<string>()
+  for (const atBat of atBats) {
+    if (atBat.eventId !== eventId || atBat.playerId !== playerId) continue
+    for (const id of atBat.pitchIds) claimed.add(id)
+  }
+  return claimed
+}
+
+export function currentAtBatPitches(
+  pitches: Pitch[],
+  atBats: AtBat[],
+  eventId: string,
+  playerId: string,
+): Pitch[] {
+  const claimed = claimedPitchIds(atBats, eventId, playerId)
+  return pitches.filter(
+    (p) => p.eventId === eventId && p.playerId === playerId && !claimed.has(p.id),
+  )
 }

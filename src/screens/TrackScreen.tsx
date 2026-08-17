@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
+import { AtBatBar } from '../components/AtBatBar'
 import { Baseball } from '../components/Baseball'
 import { AddPlayerSheet } from '../components/AddPlayerSheet'
 import { BottomNav } from '../components/BottomNav'
@@ -6,9 +7,9 @@ import { Field } from '../components/Field'
 import { PlayerSelect } from '../components/PlayerSelect'
 import { StatsBar } from '../components/StatsBar'
 import { clamp01, FIELD, isInStrikeZone } from '../field'
-import { formatDate } from '../storage'
+import { currentAtBatPitches, formatDate } from '../storage'
 import { useStore } from '../store'
-import type { PitchResult, View } from '../types'
+import { AT_BAT_OUTCOMES, type AtBatOutcome, type PitchResult, type View } from '../types'
 
 type Props = {
   onNavigate: (view: View) => void
@@ -22,11 +23,13 @@ export function TrackScreen({ onNavigate }: Props) {
     players,
     events,
     pitches,
+    atBats = [],
     currentEventId,
     currentPlayerId,
     addPlayer,
     addPitch,
     undoLastPitch,
+    completeAtBat,
     setCurrentPlayerId,
     cloudError,
   } = useStore()
@@ -36,6 +39,7 @@ export function TrackScreen({ onNavigate }: Props) {
   const [dragging, setDragging] = useState(false)
   const [locked, setLocked] = useState(false)
   const [result, setResult] = useState<PitchResult | null>(null)
+  const [atBatResult, setAtBatResult] = useState<AtBatOutcome | null>(null)
   const [zoneMode, setZoneMode] = useState<'idle' | PitchResult>('idle')
   const [adding, setAdding] = useState(false)
   const dragOffset = useRef({ x: 0, y: 0 })
@@ -62,6 +66,32 @@ export function TrackScreen({ onNavigate }: Props) {
   )
   const strikes = playerPitches.filter((p) => p.result === 'strike').length
   const balls = playerPitches.filter((p) => p.result === 'ball').length
+  const isGame = event?.type === 'game'
+  const pitcherAtBats = useMemo(
+    () =>
+      atBats
+        .filter((ab) => ab.eventId === currentEventId && ab.playerId === selectedPlayerId)
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+    [atBats, currentEventId, selectedPlayerId],
+  )
+  const atBatPitches = useMemo(
+    () =>
+      currentEventId && selectedPlayerId
+        ? currentAtBatPitches(pitches, atBats, currentEventId, selectedPlayerId)
+        : [],
+    [pitches, atBats, currentEventId, selectedPlayerId],
+  )
+  const atBatStrikes = atBatPitches.filter((p) => p.result === 'strike').length
+  const atBatBalls = atBatPitches.filter((p) => p.result === 'ball').length
+  const lastOutcome = pitcherAtBats[pitcherAtBats.length - 1]?.outcome
+  const lastOutcomeLabel = lastOutcome
+    ? AT_BAT_OUTCOMES.find((item) => item.id === lastOutcome)?.short
+    : null
+  const canUndo = Boolean(
+    selectedPlayerId &&
+      !locked &&
+      (isGame ? atBatPitches.length > 0 || pitcherAtBats.length > 0 : playerPitches.length > 0),
+  )
 
   const eventTitle = event
     ? event.type === 'game'
@@ -157,7 +187,7 @@ export function TrackScreen({ onNavigate }: Props) {
   }
 
   return (
-    <div className="screen screen-session">
+    <div className={`screen screen-session${isGame ? ' screen-session--game' : ''}`}>
       <header className="session-header">
         <button type="button" className="back-btn" onClick={() => onNavigate('home')}>
           Home
@@ -171,7 +201,7 @@ export function TrackScreen({ onNavigate }: Props) {
         <button
           type="button"
           className="back-btn"
-          disabled={!selectedPlayerId || playerPitches.length === 0 || locked}
+          disabled={!canUndo}
           onClick={() => {
             if (currentEventId && selectedPlayerId) undoLastPitch(currentEventId, selectedPlayerId)
           }}
@@ -187,7 +217,22 @@ export function TrackScreen({ onNavigate }: Props) {
         onAddPlayer={() => setAdding(true)}
       />
 
-      <StatsBar pitches={playerPitches.length} strikes={strikes} balls={balls} />
+      <StatsBar
+        pitches={playerPitches.length}
+        strikes={strikes}
+        balls={balls}
+        atBat={
+          isGame
+            ? {
+                number: pitcherAtBats.length + 1,
+                pitches: atBatPitches.length,
+                strikes: atBatStrikes,
+                balls: atBatBalls,
+                lastOutcome: lastOutcomeLabel,
+              }
+            : null
+        }
+      />
       {cloudError && <p className="cloud-error">{cloudError}</p>}
 
       <div className="field-wrap" ref={fieldRef}>
@@ -207,13 +252,43 @@ export function TrackScreen({ onNavigate }: Props) {
             {result === 'strike' ? 'STRIKE' : 'BALL'}
           </div>
         )}
+        {atBatResult && !result && (
+          <div className={`call-banner call-banner--atbat call-banner--${atBatResult}`} role="status">
+            {AT_BAT_OUTCOMES.find((item) => item.id === atBatResult)?.label.toUpperCase()}
+          </div>
+        )}
         {!selectedPlayerId && (
           <p className="field-hint">Select a Pitcher, then drag the ball to the pitch.</p>
         )}
-        {selectedPlayerId && !dragging && !result && (
-          <p className="field-hint">Drag the ball to where the pitch crossed.</p>
+        {selectedPlayerId && !dragging && !result && !atBatResult && (
+          <p className="field-hint">
+            {isGame
+              ? 'Drag the pitch, then mark Walk, K, HBP, Hit, or Error.'
+              : 'Drag the ball to where the pitch crossed.'}
+          </p>
         )}
       </div>
+
+      {isGame && (
+        <AtBatBar
+          disabled={!selectedPlayerId}
+          onSelect={(outcome) => {
+            if (!currentEventId || !selectedPlayerId) return
+            completeAtBat({
+              eventId: currentEventId,
+              playerId: selectedPlayerId,
+              outcome,
+            })
+            setAtBatResult(outcome)
+            try {
+              navigator.vibrate?.(24)
+            } catch {
+              /* ignore */
+            }
+            window.setTimeout(() => setAtBatResult(null), 800)
+          }}
+        />
+      )}
 
       <BottomNav view="track" onTrack={() => onNavigate('track')} onHeatmap={() => onNavigate('heatmap')} />
 

@@ -47,6 +47,10 @@ export function HomeScreen({ onNavigate }: Props) {
         Players
       </button>
 
+      <button type="button" className="btn btn-secondary" onClick={() => onNavigate('team-stats')}>
+        Team stats
+      </button>
+
       <section className="event-list">
         <h2>Recent events</h2>
         {events.length === 0 && (

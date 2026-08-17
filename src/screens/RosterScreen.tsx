@@ -33,7 +33,7 @@ export function RosterScreen({ onNavigate }: Props) {
         <p className="empty-copy">Add the kids you want to track. You can also add them from the pitch screen.</p>
       )}
 
-      <p className="empty-copy">Tap a player to see their heatmap.</p>
+      <p className="empty-copy">Tap a player to see their heatmap and season stats.</p>
 
       <ul className="roster-list">
         {players.map((player) => {

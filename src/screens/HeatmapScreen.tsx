@@ -3,24 +3,36 @@ import { AddPlayerSheet } from '../components/AddPlayerSheet'
 import { BottomNav } from '../components/BottomNav'
 import { Field } from '../components/Field'
 import { HeatmapCanvas } from '../components/HeatmapCanvas'
+import { PitcherStatsTable } from '../components/PitcherStatsTable'
 import { PlayerSelect } from '../components/PlayerSelect'
 import { StatsBar } from '../components/StatsBar'
 import { formatDate, formatEventTitle } from '../storage'
+import { playerGameRows } from '../stats'
 import { useStore } from '../store'
 import type { HeatmapScope, View } from '../types'
 
 type Props = {
   onNavigate: (view: View) => void
   mode?: 'session' | 'player'
+  backView?: View
 }
 
-export function HeatmapScreen({ onNavigate, mode = 'session' }: Props) {
-  const { players, events, pitches, currentEventId, currentPlayerId, addPlayer, setCurrentPlayerId } =
-    useStore()
+export function HeatmapScreen({ onNavigate, mode = 'session', backView = 'roster' }: Props) {
+  const {
+    players,
+    events,
+    pitches,
+    atBats,
+    currentEventId,
+    currentPlayerId,
+    addPlayer,
+    setCurrentPlayerId,
+  } = useStore()
   const isPlayerView = mode === 'player'
   const [scope, setScope] = useState<HeatmapScope>(isPlayerView ? 'all' : 'event')
   const [selectedEventId, setSelectedEventId] = useState<string | null>(currentEventId)
   const [adding, setAdding] = useState(false)
+  const [pane, setPane] = useState<'heatmap' | 'table'>('heatmap')
 
   const eventId = scope === 'event' ? selectedEventId : currentEventId
   const event = events.find((e) => e.id === eventId)
@@ -53,8 +65,16 @@ export function HeatmapScreen({ onNavigate, mode = 'session' }: Props) {
     return list
   }, [pitches, events, currentPlayerId, selectedEventId, scope, isPlayerView])
 
+  const tableRows = useMemo(
+    () =>
+      currentPlayerId ? playerGameRows(currentPlayerId, events, pitches, atBats ?? []) : [],
+    [currentPlayerId, events, pitches, atBats],
+  )
+
   const strikes = filtered.filter((p) => p.result === 'strike').length
   const balls = filtered.filter((p) => p.result === 'ball').length
+
+  const showTable = isPlayerView && pane === 'table'
 
   const scopeLabel =
     scope === 'event'
@@ -73,13 +93,19 @@ export function HeatmapScreen({ onNavigate, mode = 'session' }: Props) {
         <button
           type="button"
           className="back-btn"
-          onClick={() => onNavigate(isPlayerView ? 'roster' : 'home')}
+          onClick={() => onNavigate(isPlayerView ? backView : 'home')}
         >
-          {isPlayerView ? 'Players' : 'Home'}
+          {isPlayerView ? (backView === 'team-stats' ? 'Stats' : 'Players') : 'Home'}
         </button>
         <div className="session-title">
-          <strong>{isPlayerView ? (playerName ?? 'Heatmap') : 'Heatmap'}</strong>
-          <span>{isPlayerView ? 'Heatmap' : (playerName ?? 'Select a player')}</span>
+          <strong>{isPlayerView ? (playerName ?? 'Pitcher') : 'Heatmap'}</strong>
+          <span>
+            {isPlayerView
+              ? showTable
+                ? 'Season stats'
+                : 'Heatmap'
+              : (playerName ?? 'Select a player')}
+          </span>
         </div>
         <span className="header-spacer" />
       </header>
@@ -94,7 +120,27 @@ export function HeatmapScreen({ onNavigate, mode = 'session' }: Props) {
         />
       )}
 
-      <div className="segmented" role="group" aria-label="Heatmap range">
+      {isPlayerView && (
+        <div className="segmented" role="group" aria-label="Player view">
+          <button
+            type="button"
+            className={pane === 'heatmap' ? 'is-active' : ''}
+            onClick={() => setPane('heatmap')}
+          >
+            Heatmap
+          </button>
+          <button
+            type="button"
+            className={pane === 'table' ? 'is-active' : ''}
+            onClick={() => setPane('table')}
+          >
+            Table
+          </button>
+        </div>
+      )}
+
+      {!showTable && (
+        <div className="segmented" role="group" aria-label="Heatmap range">
         <button
           type="button"
           className={scope === 'event' ? 'is-active' : ''}
@@ -131,8 +177,9 @@ export function HeatmapScreen({ onNavigate, mode = 'session' }: Props) {
           All
         </button>
       </div>
+      )}
 
-      {scope === 'event' && (
+      {!showTable && scope === 'event' && (
         <select
           aria-label="Event"
           value={
@@ -158,21 +205,30 @@ export function HeatmapScreen({ onNavigate, mode = 'session' }: Props) {
         </select>
       )}
 
-      <StatsBar pitches={filtered.length} strikes={strikes} balls={balls} />
-      <p className="scope-caption">{scopeLabel}</p>
+      {showTable ? (
+        <>
+          <p className="scope-caption">Games this season · swipe for more columns</p>
+          <PitcherStatsTable rows={tableRows} />
+        </>
+      ) : (
+        <>
+          <StatsBar pitches={filtered.length} strikes={strikes} balls={balls} />
+          <p className="scope-caption">{scopeLabel}</p>
 
-      <div className="field-wrap">
-        <Field>
-          <HeatmapCanvas pitches={filtered} />
-        </Field>
-        {filtered.length === 0 && (
-          <p className="field-hint">No pitches for this view yet.</p>
-        )}
-        <div className="heatmap-legend">
-          <span className="legend-swatch legend-swatch--strike" /> Strike
-          <span className="legend-swatch legend-swatch--ball" /> Ball
-        </div>
-      </div>
+          <div className="field-wrap">
+            <Field>
+              <HeatmapCanvas pitches={filtered} />
+            </Field>
+            {filtered.length === 0 && (
+              <p className="field-hint">No pitches for this view yet.</p>
+            )}
+            <div className="heatmap-legend">
+              <span className="legend-swatch legend-swatch--strike" /> Strike
+              <span className="legend-swatch legend-swatch--ball" /> Ball
+            </div>
+          </div>
+        </>
+      )}
 
       {!isPlayerView && (
         <BottomNav view="heatmap" onTrack={() => onNavigate('track')} onHeatmap={() => onNavigate('heatmap')} />

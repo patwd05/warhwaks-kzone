@@ -9,17 +9,19 @@ import {
   type ReactNode,
 } from 'react'
 import {
+  deleteAtBat,
   deletePitch,
   deletePlayer,
   fetchRemoteData,
+  insertAtBat,
   insertEvent,
   insertPitch,
   insertPlayer,
   deleteEvent,
   logSyncError,
 } from './api'
-import type { AppData, EventType, GameEvent, Pitch, Player } from './types'
-import { loadData, newId, saveData, todayInputValue } from './storage'
+import type { AppData, AtBat, AtBatOutcome, EventType, GameEvent, Pitch, Player } from './types'
+import { claimedPitchIds, loadData, newId, saveData, todayInputValue } from './storage'
 import { isSupabaseConfigured, supabase } from './supabase'
 
 export type CloudStatus = 'off' | 'connecting' | 'on' | 'error'
@@ -28,6 +30,7 @@ type RemoteData = {
   players: Player[]
   events: GameEvent[]
   pitches: Pitch[]
+  atBats: AtBat[]
 }
 
 type StoreValue = AppData & {
@@ -50,6 +53,11 @@ type StoreValue = AppData & {
     result: Pitch['result']
   }) => Pitch
   undoLastPitch: (eventId: string, playerId: string) => void
+  completeAtBat: (input: {
+    eventId: string
+    playerId: string
+    outcome: AtBatOutcome
+  }) => AtBat
   setCurrentEventId: (id: string | null) => void
   setCurrentPlayerId: (id: string | null) => void
 }
@@ -57,8 +65,13 @@ type StoreValue = AppData & {
 const StoreContext = createContext<StoreValue | null>(null)
 
 function persist(next: AppData) {
-  saveData(next)
-  return next
+  const data: AppData = {
+    ...next,
+    atBats: next.atBats ?? [],
+    unsyncedAtBatIds: next.unsyncedAtBatIds ?? [],
+  }
+  saveData(data)
+  return data
 }
 
 const eventSaveQueue = new Map<string, Promise<void>>()
@@ -67,6 +80,7 @@ function applyRemote(prev: AppData, remote: RemoteData): AppData {
   const removed = new Set(prev.removedEventIds ?? [])
   const unsyncedEvents = new Set(prev.unsyncedEventIds ?? [])
   const unsyncedPitches = new Set(prev.unsyncedPitchIds ?? [])
+  const unsyncedAtBats = new Set(prev.unsyncedAtBatIds ?? [])
   const inFlightEventIds = new Set(eventSaveQueue.keys())
   const players = remote.players.length > 0 ? remote.players : prev.players
 
@@ -107,6 +121,19 @@ function applyRemote(prev: AppData, remote: RemoteData): AppData {
   )
   const pitches = [...remotePitches, ...pendingPitches]
 
+  const remoteAtBats = (remote.atBats ?? []).filter(
+    (ab) => !removed.has(ab.eventId) && eventIds.has(ab.eventId),
+  )
+  const remoteAtBatIds = new Set(remoteAtBats.map((ab) => ab.id))
+  const pendingAtBats = (prev.atBats ?? []).filter(
+    (ab) =>
+      !remoteAtBatIds.has(ab.id) &&
+      !removed.has(ab.eventId) &&
+      eventIds.has(ab.eventId) &&
+      unsyncedAtBats.has(ab.id),
+  )
+  const atBats = [...remoteAtBats, ...pendingAtBats]
+
   const removedEventIds = [...removed].filter(
     (id) =>
       remote.events.some((e) => e.id === id) || remote.pitches.some((p) => p.eventId === id),
@@ -122,12 +149,16 @@ function applyRemote(prev: AppData, remote: RemoteData): AppData {
     players,
     events,
     pitches,
+    atBats,
     currentPlayerId,
     currentEventId,
     removedEventIds,
     unsyncedEventIds: [...unsyncedEvents].filter((id) => !remoteEventIds.has(id) && eventIds.has(id)),
     unsyncedPitchIds: [...unsyncedPitches].filter(
       (id) => !remotePitchIds.has(id) && pitches.some((p) => p.id === id),
+    ),
+    unsyncedAtBatIds: [...unsyncedAtBats].filter(
+      (id) => !remoteAtBatIds.has(id) && atBats.some((ab) => ab.id === id),
     ),
   })
 }
@@ -160,11 +191,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       .then((remote) => {
         let unsyncedToPush: GameEvent[] = []
         let unsyncedPitchesToPush: Pitch[] = []
+        let unsyncedAtBatsToPush: AtBat[] = []
         setData((prev) => {
           const next = applyRemote(prev, remote)
           unsyncedToPush = next.events.filter((event) => next.unsyncedEventIds.includes(event.id))
           unsyncedPitchesToPush = next.pitches.filter((pitch) =>
             next.unsyncedPitchIds.includes(pitch.id),
+          )
+          unsyncedAtBatsToPush = next.atBats.filter((atBat) =>
+            next.unsyncedAtBatIds.includes(atBat.id),
           )
           for (const id of next.removedEventIds) {
             void deleteEvent(id).catch((error) => logSyncError('remove event', error))
@@ -195,6 +230,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             })
             .catch((error) => logSyncError('sync pitch', error))
         }
+        for (const atBat of unsyncedAtBatsToPush) {
+          void insertAtBat(atBat)
+            .then(() => {
+              setData((prev) =>
+                persist({
+                  ...prev,
+                  unsyncedAtBatIds: (prev.unsyncedAtBatIds ?? []).filter((id) => id !== atBat.id),
+                }),
+              )
+            })
+            .catch((error) => logSyncError('sync at-bat', error))
+        }
         setCloudStatus('on')
         setCloudError(null)
       })
@@ -221,6 +268,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       .channel('kzone-sync')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'events' }, refreshCloud)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'pitches' }, refreshCloud)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'at_bats' }, refreshCloud)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'players' }, refreshCloud)
       .subscribe()
 
@@ -261,6 +309,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ...prev,
         players: prev.players.filter((p) => p.id !== id),
         pitches: prev.pitches.filter((p) => p.playerId !== id),
+        atBats: (prev.atBats ?? []).filter((ab) => ab.playerId !== id),
         currentPlayerId: prev.currentPlayerId === id ? null : prev.currentPlayerId,
       }),
     )
@@ -320,6 +369,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ...prev,
         events: prev.events.filter((e) => e.id !== id),
         pitches: prev.pitches.filter((p) => p.eventId !== id),
+        atBats: (prev.atBats ?? []).filter((ab) => ab.eventId !== id),
         currentEventId: prev.currentEventId === id ? null : prev.currentEventId,
         removedEventIds: prev.removedEventIds.includes(id)
           ? prev.removedEventIds
@@ -327,6 +377,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         unsyncedEventIds: prev.unsyncedEventIds.filter((eventId) => eventId !== id),
         unsyncedPitchIds: prev.unsyncedPitchIds.filter(
           (pitchId) => !prev.pitches.some((p) => p.id === pitchId && p.eventId === id),
+        ),
+        unsyncedAtBatIds: (prev.unsyncedAtBatIds ?? []).filter(
+          (atBatId) => !(prev.atBats ?? []).some((ab) => ab.id === atBatId && ab.eventId === id),
         ),
       }),
     )
@@ -400,31 +453,109 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   )
 
   const undoLastPitch = useCallback((eventId: string, playerId: string) => {
-    let removedId: string | null = null
+    let removedPitchId: string | null = null
+    let removedAtBatId: string | null = null
     setData((prev) => {
+      const claimed = claimedPitchIds(prev.atBats ?? [], eventId, playerId)
       const pitches = [...prev.pitches]
       for (let i = pitches.length - 1; i >= 0; i--) {
         const p = pitches[i]
-        if (p && p.eventId === eventId && p.playerId === playerId) {
-          removedId = p.id
+        if (p && p.eventId === eventId && p.playerId === playerId && !claimed.has(p.id)) {
+          removedPitchId = p.id
           pitches.splice(i, 1)
           break
         }
       }
-      if (!removedId) return prev
+      if (removedPitchId) {
+        return persist({
+          ...prev,
+          pitches,
+          unsyncedPitchIds: prev.unsyncedPitchIds.filter((id) => id !== removedPitchId),
+        })
+      }
+
+      const atBats = [...(prev.atBats ?? [])]
+      for (let i = atBats.length - 1; i >= 0; i--) {
+        const atBat = atBats[i]
+        if (atBat && atBat.eventId === eventId && atBat.playerId === playerId) {
+          removedAtBatId = atBat.id
+          atBats.splice(i, 1)
+          break
+        }
+      }
+      if (!removedAtBatId) return prev
       return persist({
         ...prev,
-        pitches,
-        unsyncedPitchIds: prev.unsyncedPitchIds.filter((id) => id !== removedId),
+        atBats,
+        unsyncedAtBatIds: (prev.unsyncedAtBatIds ?? []).filter((id) => id !== removedAtBatId),
       })
     })
-    if (removedId) {
-      void deletePitch(removedId).catch((error) => {
+    if (removedPitchId) {
+      void deletePitch(removedPitchId).catch((error) => {
         logSyncError('undo pitch', error)
+        setCloudError(errorMessage(error))
+      })
+    } else if (removedAtBatId) {
+      void deleteAtBat(removedAtBatId).catch((error) => {
+        logSyncError('undo at-bat', error)
         setCloudError(errorMessage(error))
       })
     }
   }, [])
+
+  const completeAtBat = useCallback(
+    (input: { eventId: string; playerId: string; outcome: AtBatOutcome }) => {
+      const claimed = claimedPitchIds(dataRef.current.atBats ?? [], input.eventId, input.playerId)
+      const pitchIds = dataRef.current.pitches
+        .filter(
+          (p) => p.eventId === input.eventId && p.playerId === input.playerId && !claimed.has(p.id),
+        )
+        .map((p) => p.id)
+      const atBatPitches = dataRef.current.pitches.filter((p) => pitchIds.includes(p.id))
+      const atBat: AtBat = {
+        id: newId(),
+        eventId: input.eventId,
+        playerId: input.playerId,
+        outcome: input.outcome,
+        pitchIds,
+        pitches: atBatPitches.length,
+        strikes: atBatPitches.filter((p) => p.result === 'strike').length,
+        balls: atBatPitches.filter((p) => p.result === 'ball').length,
+        createdAt: new Date().toISOString(),
+      }
+      setData((prev) =>
+        persist({
+          ...prev,
+          atBats: [...(prev.atBats ?? []), atBat],
+          unsyncedAtBatIds: (prev.unsyncedAtBatIds ?? []).includes(atBat.id)
+            ? (prev.unsyncedAtBatIds ?? [])
+            : [...(prev.unsyncedAtBatIds ?? []), atBat.id],
+        }),
+      )
+      void (async () => {
+        try {
+          if (dataRef.current.removedEventIds.includes(atBat.eventId)) return
+          const pendingEvent = eventSaveQueue.get(atBat.eventId)
+          if (pendingEvent) await pendingEvent
+          if (dataRef.current.removedEventIds.includes(atBat.eventId)) return
+          if (!dataRef.current.events.some((item) => item.id === atBat.eventId)) return
+          await insertAtBat(atBat)
+          setData((prev) =>
+            persist({
+              ...prev,
+              unsyncedAtBatIds: (prev.unsyncedAtBatIds ?? []).filter((id) => id !== atBat.id),
+            }),
+          )
+          setCloudError(null)
+        } catch (error) {
+          logSyncError('complete at-bat', error)
+          setCloudError(errorMessage(error))
+        }
+      })()
+      return atBat
+    },
+    [],
+  )
 
   const setCurrentEventId = useCallback((id: string | null) => {
     setData((prev) => persist({ ...prev, currentEventId: id }))
@@ -441,12 +572,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       cloudError,
       refreshCloud,
       players: [...data.players].sort((a, b) => a.name.localeCompare(b.name)),
+      atBats: data.atBats ?? [],
       addPlayer,
       removePlayer,
       createEvent,
       removeEvent,
       addPitch,
       undoLastPitch,
+      completeAtBat,
       setCurrentEventId,
       setCurrentPlayerId,
     }),
@@ -461,6 +594,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       removeEvent,
       addPitch,
       undoLastPitch,
+      completeAtBat,
       setCurrentEventId,
       setCurrentPlayerId,
     ],

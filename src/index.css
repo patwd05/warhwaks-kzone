@@ -87,6 +87,10 @@ button {
   gap: 10px;
 }
 
+.screen-session--game {
+  padding-bottom: calc(148px + var(--safe-bottom));
+}
+
 .home-hero {
   padding: 20px 8px 8px;
   display: flex;
@@ -492,6 +496,117 @@ select {
   color: var(--cream-dim);
 }
 
+.stats-table {
+  background: #0e1a30;
+  border-radius: 14px;
+  padding: 6px 6px 8px;
+}
+
+.stats-table-head,
+.stats-table-row {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr 1fr 1fr;
+  align-items: center;
+  text-align: center;
+}
+
+.stats-table-head {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--cream-dim);
+  padding: 2px 0 4px;
+}
+
+.stats-table-label {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--cream-dim);
+  padding-left: 8px;
+}
+
+.stats-table-label em {
+  display: block;
+  font-style: normal;
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--hawks-orange);
+}
+
+.stats-table-row .stat-value {
+  font-size: 28px;
+}
+
+.stats-table-row .stat--strike {
+  color: #ff6b81;
+}
+
+.stats-table-row .stat--ball {
+  color: #8ec0ff;
+}
+
+.stats-table-row--ab {
+  background: rgba(241, 90, 34, 0.14);
+  border-radius: 10px;
+  padding: 4px 0;
+}
+
+.stats-table-row--ab .stats-table-label {
+  color: var(--cream);
+}
+
+.at-bat-bar {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: calc(70px + var(--safe-bottom));
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  z-index: 6;
+}
+
+.at-bat-btn {
+  border: 1px solid rgba(244, 239, 228, 0.12);
+  border-radius: 12px;
+  min-height: 48px;
+  padding: 0 2px;
+  background: #0e1a30;
+  color: var(--cream);
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+.at-bat-btn:disabled {
+  opacity: 0.4;
+}
+
+.at-bat-btn--k {
+  color: #ffd2d8;
+}
+
+.at-bat-btn--walk {
+  color: #8ec0ff;
+}
+
+.at-bat-btn--hit {
+  color: #ffd4c2;
+}
+
+.at-bat-btn--hbp {
+  color: #f6e7b2;
+}
+
+.at-bat-btn--error {
+  color: #d7f0c8;
+}
+
 .field-wrap {
   position: relative;
   flex: 1;
@@ -640,6 +755,35 @@ select {
   background: rgba(44, 108, 176, 0.3);
 }
 
+.call-banner--atbat {
+  font-size: 64px;
+}
+
+.call-banner--walk {
+  color: #e7f1ff;
+  background: rgba(44, 108, 176, 0.32);
+}
+
+.call-banner--k {
+  color: #ffe6ea;
+  background: rgba(196, 30, 58, 0.32);
+}
+
+.call-banner--hbp {
+  color: #fff4d0;
+  background: rgba(196, 150, 30, 0.32);
+}
+
+.call-banner--hit {
+  color: #ffe8de;
+  background: rgba(241, 90, 34, 0.36);
+}
+
+.call-banner--error {
+  color: #e8ffd8;
+  background: rgba(63, 107, 50, 0.4);
+}
+
 @keyframes pop {
   from {
     transform: scale(0.86);
@@ -703,6 +847,153 @@ select {
   text-align: center;
   font-size: 12px;
   color: var(--cream-dim);
+}
+
+.stats-scroll {
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  flex: 1;
+  min-height: 0;
+  padding-bottom: 12px;
+}
+
+.pitcher-table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+}
+
+.pitcher-table th,
+.pitcher-table td {
+  padding: 10px 8px;
+  text-align: right;
+  white-space: nowrap;
+  border-bottom: 1px solid rgba(244, 239, 228, 0.08);
+}
+
+.pitcher-table thead th {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--cream-dim);
+  font-weight: 800;
+}
+
+.pitcher-table thead th:first-child,
+.pitcher-table tbody th {
+  position: sticky;
+  left: 0;
+  text-align: left;
+  background: var(--navy);
+  min-width: 92px;
+  max-width: 112px;
+  padding-left: 10px;
+  box-shadow: 6px 0 10px rgba(11, 20, 36, 0.4);
+}
+
+.pitcher-table thead th:first-child {
+  z-index: 2;
+}
+
+.pitcher-table tbody th span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pitcher-table tbody th em {
+  display: block;
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--cream-dim);
+}
+
+.pitcher-table .is-season td {
+  background: rgba(241, 90, 34, 0.18);
+  font-weight: 800;
+}
+
+.pitcher-table .is-season th {
+  background: #3d2416;
+  font-weight: 800;
+}
+
+.stat-chips {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+}
+
+.stat-chips button {
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 999px;
+  min-height: 36px;
+  padding: 0 12px;
+  background: #0e1a30;
+  color: var(--cream-dim);
+  font-weight: 800;
+  font-size: 12px;
+}
+
+.stat-chips button.is-active {
+  background: var(--cream);
+  color: var(--navy);
+}
+
+.rank-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rank-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  background: var(--navy-2);
+  border: 1px solid rgba(244, 239, 228, 0.08);
+  border-radius: 14px;
+  padding: 10px 12px;
+  min-height: 48px;
+}
+
+.rank-place {
+  width: 22px;
+  font-family: var(--display);
+  font-size: 22px;
+  line-height: 1;
+  color: var(--cream-dim);
+}
+
+.rank-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.rank-value {
+  font-family: var(--display);
+  font-size: 26px;
+  line-height: 1;
+  letter-spacing: 0.04em;
+}
+
+.team-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
 }
 
 .bottom-nav {
